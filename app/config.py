@@ -21,7 +21,7 @@ class Settings:
     azure_key: str = ""
     gemini_key: str = ""
     gemini_model: str = "gemini-3.5-flash-lite"
-    max_image_bytes: int = 8 * 1024 * 1024
+    max_image_bytes: int = 30 * 1024 * 1024
 
     @classmethod
     def from_env(cls):

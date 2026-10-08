@@ -55,6 +55,14 @@ def test_recognition_contract(client):
     assert response.json()["engine"] == "ocr"
 
 
+def test_photo_larger_than_previous_limit_is_accepted(client):
+    assert client.get("/api/status").json()["limits"]["max_image_mb"] == 30
+    response = client.post("/api/recognize",
+                           files={"file": ("foto.png", b"x" * (9 * 1024 * 1024), "image/png")},
+                           data={"mode": "ocr"})
+    assert response.status_code == 200
+
+
 @pytest.mark.parametrize("contents,status", [(b"", 400), (b"bad", 400), (b"missing", 503)])
 def test_clear_recognition_errors(client, contents, status):
     assert client.post("/api/recognize", files={"file": ("x.png", contents)}).status_code == status

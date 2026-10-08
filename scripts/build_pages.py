@@ -12,8 +12,9 @@ def main() -> None:
     DESTINATION.mkdir(exist_ok=True)
     html = (SOURCE / "home.html").read_text(encoding="utf-8")
     for original, replacement in (
-        ('href="/static/home.css?v=1"', 'href="./home.css?v=1"'),
+        ('href="/static/home.css?v=2"', 'href="./home.css?v=2"'),
         ('src="/static/home.js?v=1"', 'src="./home.js?v=1"'),
+        ('src="/static/quiz.js?v=1"', 'src="./quiz.js?v=1"'),
         ('href="/leitor"', 'href="./como-usar.html"'),
         ('href="/"', 'href="./"'),
         ('Abrir leitor', 'Como testar o leitor'),
@@ -22,7 +23,7 @@ def main() -> None:
     ):
         html = html.replace(original, replacement)
     (DESTINATION / "index.html").write_text(html, encoding="utf-8")
-    for filename in ("home.css", "home.js"):
+    for filename in ("home.css", "home.js", "quiz.js"):
         (DESTINATION / filename).write_bytes((SOURCE / filename).read_bytes())
     (DESTINATION / ".nojekyll").touch()
     (DESTINATION / "como-usar.html").write_text(

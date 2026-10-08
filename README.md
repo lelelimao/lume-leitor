@@ -10,6 +10,8 @@ Na primeira instalação, dê dois cliques em **`instalar.cmd`**. Ele detecta o 
 
 Com as dependências instaladas, dê dois cliques em **`iniciar.cmd`**, mantenha o terminal aberto e acesse **http://localhost:8000** no Chrome ou Edge. A página inicial apresenta a pesquisa **Os limites das máquinas**; o leitor prático está em **http://localhost:8000/leitor**.
 
+Na apresentação, a seção **Quiz** traz 24 perguntas sobre fundamentos de IA, impactos, ética e informação. Escolha tema, dificuldade e tamanho da rodada. As perguntas e alternativas são sorteadas a cada partida; cada acerto vale 10 pontos e recebe uma explicação. O quiz também funciona na apresentação publicada pelo GitHub Pages, sem o servidor Python.
+
 ## Publicar no GitHub
 
 O código do leitor pode ficar em um repositório GitHub. A apresentação está preparada em `docs/` para publicação em **Settings → Pages → Deploy from a branch → main → /docs**. Ao alterar `app/static/home.html`, `home.css` ou `home.js`, execute `python scripts/build_pages.py` e publique o `docs/` atualizado.
@@ -31,8 +33,8 @@ Ou, no PowerShell dentro da pasta do projeto:
 ### Identificar e pesquisar um objeto em uma foto
 
 1. No leitor, abra **Conectar Gemini** e informe uma chave da API Gemini. A chave é validada e salva apenas no `.env` deste computador.
-2. Em **Motor de leitura**, escolha **Gemini · ler foto e objetos** para identificar objetos e transcrever texto, ou **Gemini · pesquisar objeto** para acrescentar um resumo pesquisado e links das fontes.
-3. Clique em **Carregar imagem** ou capture uma foto da webcam com **Analisar foto**. A análise de imagem carregada começa automaticamente. O objeto principal é marcado na foto quando o Gemini fornece coordenadas, e o texto aparece ao lado. Com **Falar assim que reconhecer** ligado, a descrição é enviada à saída de voz selecionada.
+2. Na seção **Explorar com Gemini**, clique em **Ler foto e objetos** para identificar objetos e transcrever texto, ou **Pesquisar objeto** para acrescentar um resumo e links das fontes.
+3. O botão usa a foto já aberta ou pede que você escolha uma. Também é possível enquadrar o objeto na webcam e clicar em um dos botões. O objeto principal é marcado na foto quando o Gemini fornece coordenadas, e o texto aparece ao lado. Com **Falar assim que reconhecer** ligado, a descrição é enviada à saída de voz selecionada.
 
 O modo de pesquisa tenta usar a busca do Gemini. Se a cota de busca da chave estiver indisponível, consulta um resumo da Wikipédia em português e mostra o link. Se nenhuma fonte responder, mostra apenas a identificação visual e um aviso. A pesquisa resume as fontes encontradas; confira as informações antes de compartilhar. A foto é enviada ao Google somente nos modos Gemini, e o nome do objeto é consultado na Wikipédia quando ela é usada. Esses modos requerem internet e podem consumir cota da API.
 
@@ -176,7 +178,7 @@ Os testes automatizados de Alexa usam um servidor simulado e **não enviam falas
 - **Nenhum texto:** melhore foco/iluminação e aproxime a câmera. Compare com o modo Tesseract. Escrita cursiva, texto inclinado, reflexos e letras muito pequenas podem falhar; o projeto não promete reconhecimento perfeito.
 - **Português ausente:** execute `tools/tesseract/tesseract.exe --list-langs`. Instale `por.traineddata` se necessário. A aplicação mostra aviso se usar apenas os idiomas disponíveis.
 - **YOLO ausente/corrompido:** execute novamente `scripts/download_models.py`. O hash do modelo padrão é verificado antes de carregá-lo.
-- **Limites:** arquivos de até 8 MB e 24 megapixels, redimensionados para até 1600 px; até 40 regiões por captura no YOLO e limite de tempo de OCR. Os avisos indicam leituras parciais. Fala da Alexa limitada a 4000 caracteres por envio, sem truncamento silencioso.
+- **Limites:** arquivos de até 30 MB e 50 megapixels, redimensionados para até 1600 px; até 40 regiões por captura no YOLO e limite de tempo de OCR. Os avisos indicam leituras parciais. Fala da Alexa limitada a 4000 caracteres por envio, sem truncamento silencioso.
 - **Privacidade:** capturas são processadas em memória pelo servidor Python local; não há armazenamento de fotos ou histórico em disco. Nos modos Gemini, a foto é enviada à API Google Gemini; no modo de pesquisa, o nome do objeto também pode ser consultado na Wikipédia. Imagens não são enviadas a provedores de voz. O texto vai à Microsoft na Voz natural/Azure, ao Google Translate na saída Google, ou ao Home Assistant e integração Amazon na saída Alexa. A voz do sistema pode usar o serviço do provedor conforme a voz escolhida. As fontes visuais são carregadas do Google Fonts, com alternativa local se indisponíveis. O `.env` guarda o token Home Assistant e as chaves Azure/Gemini: mantenha-o privado.
 
 ## Modelos e licenças

@@ -14,7 +14,7 @@
     stream: null, starting: false, source: null, file: null, imageUrl: null,
     session: 0, request: null, timer: null, regions: [], frameWidth: 0, frameHeight: 0,
     tracker: new ReadingStability.Tracker(), spokenTexts: new Set(), speaking: false, speechVersion: 0,
-    alexaPending: false, nextAlexaAt: 0, maxImageMB: 8, modelExists: false, geminiConfigured: false,
+    alexaPending: false, nextAlexaAt: 0, maxImageMB: 30, modelExists: false, geminiConfigured: false,
     audioContext: null, audioSource: null, googleRequest: null, nextGoogleAt: 0,
     audioPlaying: false, mouthFrame: null, speechPreview: "", voiceCatalog: [], catalogVersion: 0,
   };
@@ -94,6 +94,14 @@
   function updateControls() {
     const available = Boolean(state.source);
     ui.capture.disabled = !available || Boolean(state.request) || state.starting;
+    for (const [id, mode] of [["gemini-read-button", "gemini"], ["gemini-research-button", "gemini_research"]]) {
+      const button = $(id);
+      button.disabled = Boolean(state.request) || state.starting;
+      button.classList.toggle("selected", ui.mode.value === mode);
+    }
+    const geminiConnection = $("gemini-connection-state");
+    geminiConnection.textContent = state.geminiConfigured ? "● Conectado" : "Chave necessária";
+    geminiConnection.classList.toggle("ready", state.geminiConfigured);
     ui.camera.disabled = false;
     ui.camera.querySelector("span").textContent = state.starting ? "Cancelar abertura" : state.stream ? "Desligar câmera" : "Ativar câmera";
     ui.autoRead.disabled = !state.stream || ui.mode.value.startsWith("gemini");
@@ -257,7 +265,7 @@
         if (state.stream === stream) { stopCamera(false); message("A câmera foi desconectada. Conecte-a novamente ou envie uma imagem.", true); }
       }, { once: true });
       updateControls();
-      message(ui.autoRead.checked ? "Câmera ativa. O primeiro texto reconhecido aparecerá e será lido automaticamente." : ui.mode.value.startsWith("gemini") ? "Câmera ativa. Enquadre o objeto e selecione Identificar texto para analisar uma foto." : "Câmera ativa. Enquadre o texto e selecione Identificar texto.");
+      message(ui.autoRead.checked ? "Câmera ativa. O primeiro texto reconhecido aparecerá e será lido automaticamente." : ui.mode.value.startsWith("gemini") ? "Câmera ativa. Enquadre o objeto e clique em Analisar foto ou em uma das ações Gemini." : "Câmera ativa. Enquadre o texto e selecione Identificar texto.");
       if (ui.autoRead.checked) scheduleNext(300);
     } catch (error) {
       if (session !== state.session) return;
@@ -677,7 +685,8 @@
     try {
       const response = await fetch("/api/status");
       const data = await responseBody(response);
-      state.maxImageMB = Number(data.limits?.max_image_mb) || 8;
+      state.maxImageMB = Number(data.limits?.max_image_mb) || 30;
+      if (!state.source) $("frame-info").textContent = `JPG, PNG, WebP ou BMP · até ${state.maxImageMB} MB`;
       state.modelExists = Boolean(data.vision?.model_exists);
       state.geminiConfigured = Boolean(data.gemini?.configured);
       if (!state.modelExists) ui.mode.value = "ocr";
@@ -691,6 +700,7 @@
       $("alexa-option").disabled = !alexaReady;
       $("alexa-option").textContent = alexaReady ? "Alexa · integração configurada" : "Alexa · integração não configurada";
       $("alexa-config-status").textContent = alexaReady ? "Integração configurada no servidor. Selecione Alexa na saída de voz." : "Integração ainda não configurada. A voz do navegador está disponível.";
+      updateControls();
     } catch (error) {
       $("server-dot").classList.add("error");
       $("server-status").textContent = "Servidor desconectado";
@@ -704,6 +714,23 @@
   ui.capture.addEventListener("click", () => recognize(false));
   ui.uploadButton.addEventListener("click", () => { unlockAudio(); ui.upload.click(); });
   ui.upload.addEventListener("change", () => { const file = ui.upload.files[0]; ui.upload.value = ""; loadFile(file); });
+  function runGeminiMode(mode) {
+    if (state.request) return;
+    unlockAudio();
+    if (ui.mode.value !== mode) {
+      ui.mode.value = mode;
+      ui.mode.dispatchEvent(new Event("change"));
+    }
+    if (!state.geminiConfigured) {
+      if (!$("gemini-dialog").open) $("gemini-dialog").showModal();
+      return;
+    }
+    if (state.source) { void recognize(false); return; }
+    message("Escolha uma foto para analisar com Gemini.");
+    ui.upload.click();
+  }
+  $("gemini-read-button").addEventListener("click", () => runGeminiMode("gemini"));
+  $("gemini-research-button").addEventListener("click", () => runGeminiMode("gemini_research"));
   ui.autoRead.addEventListener("change", () => {
     resetStability();
     if (ui.autoRead.checked) { message("Leitura contínua ativada. O próximo texto reconhecido aparecerá e será falado."); scheduleNext(100); }
@@ -717,7 +744,7 @@
     updateControls();
     if (ui.mode.value === "yolo_ocr" && !state.modelExists) warning("Modelo YOLO de texto não encontrado. Configure YOLO_MODEL_PATH no servidor ou selecione Tesseract para continuar.");
     else { warning(); message(ui.mode.value === "yolo_ocr" ? "YOLO detectará as regiões; Tesseract reconhecerá o texto." : ui.mode.value === "ocr" ? "Tesseract selecionado para reconhecimento de texto." : ui.mode.value === "gemini_research" ? "Envie uma foto para identificar o objeto e pesquisar informações com fontes." : "Envie uma foto para identificar objetos e ler o texto visível."); }
-    if (ui.mode.value.startsWith("gemini") && !state.geminiConfigured) $("gemini-dialog").showModal();
+    if (ui.mode.value.startsWith("gemini") && !state.geminiConfigured && !$("gemini-dialog").open) $("gemini-dialog").showModal();
     if (state.stream && ui.autoRead.checked) scheduleNext(100);
   });
   ui.transcript.addEventListener("input", () => { resetStability(); updateTranscript(); });
@@ -790,10 +817,14 @@
         method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({key}),
       }));
       state.geminiConfigured = true;
+      updateControls();
       $("gemini-key").value = "";
       $("gemini-key-hint").textContent = "Chave salva neste computador. Deixe em branco para manter a configuração.";
       $("gemini-config-status").textContent = data.message;
-      message("Gemini conectado. Envie uma foto ou selecione Identificar texto.");
+      geminiDialog.close();
+      $("gemini-read-button").focus();
+      message("Gemini conectado. Clique em Ler foto e objetos ou Pesquisar objeto.");
+      if (state.source && ui.mode.value.startsWith("gemini")) void recognize(false);
     } catch (error) {
       $("gemini-config-status").textContent = error.message;
       $("gemini-config-status").classList.add("error");

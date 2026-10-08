@@ -23,7 +23,7 @@ import warnings
 MODEL_REVISION = "8fc8436770be72178cf788983b73bf6a75c967e3"
 MODEL_SHA256 = "ce26dca363a67fe96c09cc51bed5d09de887239ad5f8a1bd71ee216c2f602a20"
 MODES = {"yolo_ocr", "ocr"}
-MAX_IMAGE_PIXELS = 24_000_000
+MAX_IMAGE_PIXELS = 50_000_000
 MAX_DIMENSION = 1600
 MAX_REGIONS = 40
 
@@ -119,7 +119,7 @@ class RecognitionEngine:
                     if original.format not in {"JPEG", "PNG", "WEBP", "BMP"}:
                         raise ValueError("Formato de imagem não suportado. Use JPEG, PNG, WebP ou BMP.")
                     if original.width * original.height > MAX_IMAGE_PIXELS:
-                        raise ValueError("A imagem excede o limite de 24 megapixels.")
+                        raise ValueError("A imagem excede o limite de 50 megapixels.")
                     original.load()
                     image = ImageOps.exif_transpose(original)
                     if image.mode in {"RGBA", "LA"} or "transparency" in image.info:

@@ -1,5 +1,6 @@
 import logging
 import asyncio
+import math
 from pathlib import Path
 from threading import BoundedSemaphore
 from typing import Literal
@@ -76,6 +77,8 @@ def create_app(settings=None, engine=None, speaker=None, env_path=None, google_v
     app.state.speaker = speaker
     app.state.gemini_vision = gemini_vision
     gate = BoundedSemaphore(1)
+    max_image_mb = math.ceil(settings.max_image_bytes / (1024 * 1024))
+    image_limit_message = f"A imagem deve ter até {max_image_mb} MB."
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=["localhost", "127.0.0.1", "[::1]", "testserver"])
 
     @app.middleware("http")
@@ -93,7 +96,7 @@ def create_app(settings=None, engine=None, speaker=None, env_path=None, google_v
             except ValueError:
                 return JSONResponse({"detail": "Tamanho de requisição inválido."}, 400)
             if too_large:
-                return JSONResponse({"detail": "A imagem deve ter até 8 MB."}, 413)
+                return JSONResponse({"detail": image_limit_message}, 413)
         response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "no-referrer"
@@ -114,7 +117,7 @@ def create_app(settings=None, engine=None, speaker=None, env_path=None, google_v
         return {"name": "Lume", "version": "2.0.0", "vision": vision,
                 "alexa": {"configured": speaker.configured},
                 "gemini": {"configured": bool(settings.gemini_key), "model": settings.gemini_model},
-                "limits": {"max_image_mb": 8}}
+                "limits": {"max_image_mb": max_image_mb}}
 
     @app.get("/api/gemini/config")
     async def gemini_config():
@@ -131,7 +134,7 @@ def create_app(settings=None, engine=None, speaker=None, env_path=None, google_v
                 settings = candidate
                 speaker.settings = candidate
                 return {"configured": True, "model": candidate.gemini_model,
-                        "message": "Gemini conectado. Escolha um modo Gemini e carregue uma foto."}
+                        "message": "Gemini conectado. Use os botões Ler foto e objetos ou Pesquisar objeto."}
             except GeminiError as exc:
                 raise HTTPException(exc.status_code, str(exc)) from exc
             except OSError as exc:
@@ -144,7 +147,7 @@ def create_app(settings=None, engine=None, speaker=None, env_path=None, google_v
         finally:
             await file.close()
         if len(contents) > settings.max_image_bytes:
-            raise HTTPException(413, "A imagem deve ter até 8 MB.")
+            raise HTTPException(413, image_limit_message)
         if not contents:
             raise HTTPException(400, "A imagem enviada está vazia.")
         if not gate.acquire(blocking=False):
