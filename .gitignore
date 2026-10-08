@@ -1,0 +1,17 @@
+.venv/
+.venv-anterior-*/
+.venv-antiga*/
+.env
+.env.*
+!.env.example
+.runtime/
+__pycache__/
+.pytest_cache/
+pytest-cache-files-*/
+*.pyc
+*.log
+models/*.pt
+models/*.onnx
+tools/
+artifacts/
+Ultralytics/
