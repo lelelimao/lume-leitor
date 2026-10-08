@@ -16,7 +16,7 @@ Na apresentação, a seção **Quiz** traz 24 perguntas sobre fundamentos de IA,
 
 O código do leitor pode ficar em um repositório GitHub. A apresentação está preparada em `docs/` para publicação em **Settings → Pages → Deploy from a branch → main → /docs**. Ao alterar `app/static/home.html`, `home.css` ou `home.js`, execute `python scripts/build_pages.py` e publique o `docs/` atualizado.
 
-O GitHub Pages hospeda apenas a apresentação estática. A câmera, YOLO, Tesseract, Gemini e a integração Alexa exigem o servidor Python iniciado em um computador ou hospedagem própria para Python. A página publicada aponta para instruções de download e execução local do leitor. Não publique `.env`, ambientes virtuais nem tokens.
+O GitHub Pages hospeda apenas a apresentação estática. O botão **Abrir leitor local** nela aponta para `http://localhost:8000/leitor` no computador de quem clicou. A câmera, YOLO, Tesseract, Gemini e Alexa exigem que essa pessoa execute o servidor Python antes; há um link separado **Como instalar**. Não publique `.env`, ambientes virtuais nem tokens.
 
 Ou, no PowerShell dentro da pasta do projeto:
 
