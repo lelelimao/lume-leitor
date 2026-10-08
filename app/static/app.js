@@ -14,7 +14,7 @@
     stream: null, starting: false, source: null, file: null, imageUrl: null,
     session: 0, request: null, timer: null, regions: [], frameWidth: 0, frameHeight: 0,
     tracker: new ReadingStability.Tracker(), spokenTexts: new Set(), speaking: false, speechVersion: 0,
-    alexaPending: false, nextAlexaAt: 0, maxImageMB: 8, modelExists: false,
+    alexaPending: false, nextAlexaAt: 0, maxImageMB: 8, modelExists: false, geminiConfigured: false,
     audioContext: null, audioSource: null, googleRequest: null, nextGoogleAt: 0,
     audioPlaying: false, mouthFrame: null, speechPreview: "", voiceCatalog: [], catalogVersion: 0,
   };
@@ -26,6 +26,45 @@
   function message(text, error = false) {
     $("message").textContent = text;
     $("message-bar").classList.toggle("error", error);
+  }
+
+  function imageStatus(text = "", error = false) {
+    const status = $("image-status");
+    status.textContent = text;
+    status.hidden = !text;
+    status.classList.toggle("error", error);
+  }
+
+  function clearObjectResult() {
+    $("object-result").textContent = "";
+    $("object-result").hidden = true;
+    $("research-source-list").replaceChildren();
+    $("research-sources").hidden = true;
+  }
+
+  function showObjectResult(data) {
+    clearObjectResult();
+    const objects = Array.isArray(data.objects) ? data.objects.filter((item) => typeof item === "string" && item.trim()).slice(0, 6) : [];
+    const primary = typeof data.primary_object === "string" ? data.primary_object.trim() : "";
+    if (objects.length || primary) {
+      $("object-result").textContent = primary ? `Objeto principal: ${primary}${objects.length ? ` · Também na foto: ${objects.filter((item) => item !== primary).join(", ")}` : ""}` : `Objetos na foto: ${objects.join(", ")}`;
+      $("object-result").hidden = false;
+    }
+    for (const source of Array.isArray(data.sources) ? data.sources : []) {
+      try {
+        const url = new URL(source.url);
+        if (!["https:", "http:"].includes(url.protocol)) continue;
+        const link = document.createElement("a");
+        link.href = url.href;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        link.textContent = String(source.title || url.hostname).slice(0, 120);
+        const item = document.createElement("li");
+        item.append(link);
+        $("research-source-list").append(item);
+      } catch { /* Ignore malformed source URLs. */ }
+    }
+    $("research-sources").hidden = !$("research-source-list").childElementCount;
   }
 
   function warning(text = "") {
@@ -45,6 +84,7 @@
     try { body = await response.json(); } catch { body = {}; }
     if (!response.ok) {
       const error = new Error(errorText(body.detail || body.message, `O servidor não concluiu a operação (HTTP ${response.status}).`));
+      error.status = response.status;
       error.retryAfter = Number(body.retry_after || body.detail?.retry_after || response.headers.get("Retry-After") || 0);
       throw error;
     }
@@ -56,8 +96,8 @@
     ui.capture.disabled = !available || Boolean(state.request) || state.starting;
     ui.camera.disabled = false;
     ui.camera.querySelector("span").textContent = state.starting ? "Cancelar abertura" : state.stream ? "Desligar câmera" : "Ativar câmera";
-    ui.autoRead.disabled = !state.stream;
-    ui.capture.querySelector("span").textContent = state.request && !state.tracker.current ? "Reconhecendo…" : "Identificar texto";
+    ui.autoRead.disabled = !state.stream || ui.mode.value.startsWith("gemini");
+    ui.capture.querySelector("span").textContent = state.request && !state.tracker.current ? ui.mode.value === "gemini_research" ? "Pesquisando…" : "Reconhecendo…" : ui.mode.value.startsWith("gemini") ? "Analisar foto" : "Identificar texto";
     const textExists = Boolean(ui.transcript.value.trim());
     ui.speak.disabled = !textExists || state.alexaPending || (ui.output.value === "browser" && !hasSpeech);
     ui.stopSpeech.disabled = !state.speaking;
@@ -164,6 +204,8 @@
 
   function stopCamera(announce = true) {
     cancelRecognition();
+    imageStatus();
+    clearObjectResult();
     if (state.stream) state.stream.getTracks().forEach((track) => track.stop());
     state.stream = null;
     state.starting = false;
@@ -215,7 +257,7 @@
         if (state.stream === stream) { stopCamera(false); message("A câmera foi desconectada. Conecte-a novamente ou envie uma imagem.", true); }
       }, { once: true });
       updateControls();
-      message(ui.autoRead.checked ? "Câmera ativa. O primeiro texto reconhecido aparecerá e será lido automaticamente." : "Câmera ativa. Enquadre o texto e selecione Identificar texto.");
+      message(ui.autoRead.checked ? "Câmera ativa. O primeiro texto reconhecido aparecerá e será lido automaticamente." : ui.mode.value.startsWith("gemini") ? "Câmera ativa. Enquadre o objeto e selecione Identificar texto para analisar uma foto." : "Câmera ativa. Enquadre o texto e selecione Identificar texto.");
       if (ui.autoRead.checked) scheduleNext(300);
     } catch (error) {
       if (session !== state.session) return;
@@ -232,9 +274,9 @@
 
   function scheduleNext(delay = 1200) {
     clearTimeout(state.timer);
-    if (!state.stream || !ui.autoRead.checked) return;
+    if (!state.stream || !ui.autoRead.checked || ui.mode.value.startsWith("gemini")) return;
     state.timer = setTimeout(async () => {
-      if (!state.stream || !ui.autoRead.checked) return;
+      if (!state.stream || !ui.autoRead.checked || ui.mode.value.startsWith("gemini")) return;
       if (document.hidden || state.request) { scheduleNext(); return; }
       await recognize(true);
       scheduleNext(1200);
@@ -252,28 +294,74 @@
 
   async function recognize(automatic = false) {
     if (state.request || !state.source) return;
-    if (ui.mode.value === "yolo_ocr" && !state.modelExists) {
-      message("Adicione um modelo YOLO de texto ao servidor para usar este modo. Selecione Tesseract para ler agora.", true);
-      ui.autoRead.checked = false;
+    const imageSource = state.source === "image";
+    let selectedMode = ui.mode.value;
+    if (selectedMode.startsWith("gemini") && !state.geminiConfigured) {
+      const note = "Conecte sua chave Gemini para analisar e pesquisar esta foto.";
+      message(note, true);
+      if (imageSource) imageStatus(note, true);
+      $("gemini-dialog").showModal();
       return;
+    }
+    let usedFallback = false;
+    if (selectedMode === "yolo_ocr" && !state.modelExists) {
+      if (!imageSource) {
+        message("Adicione um modelo YOLO de texto ao servidor para usar este modo. Selecione Tesseract para ler agora.", true);
+        ui.autoRead.checked = false;
+        return;
+      }
+      selectedMode = "ocr";
+      ui.mode.value = "ocr";
+      usedFallback = true;
     }
     const session = state.session;
     const controller = new AbortController();
     state.request = controller;
+    if (!automatic) clearObjectResult();
+    if (imageSource) imageStatus(selectedMode === "gemini_research" ? "Identificando o objeto e pesquisando fontes…" : selectedMode === "gemini" ? "Identificando texto e objetos da foto…" : "Lendo o texto da imagem…");
     const processingTimer = setTimeout(() => { if (state.request === controller && (!automatic || !state.tracker.current)) $("processing").hidden = false; }, 450);
     updateControls();
     const slowTimer = setTimeout(() => {
-      if (state.request === controller) message("O reconhecimento continua em andamento. A primeira leitura pode demorar mais ao carregar o modelo; aguarde.");
+      if (state.request === controller) {
+        message("O reconhecimento continua em andamento. A primeira leitura pode demorar mais ao carregar o modelo; aguarde.");
+        if (imageSource) imageStatus("A leitura está demorando mais nesta imagem. Aguarde…");
+      }
     }, 12000);
     try {
       const blob = state.source === "camera" ? await cameraBlob() : state.file;
       if (session !== state.session) return;
-      const form = new FormData();
-      form.append("file", blob, state.source === "camera" ? "webcam.jpg" : (state.file.name || "imagem.png"));
-      form.append("mode", ui.mode.value);
-      const response = await fetch("/api/recognize", { method: "POST", body: form, signal: controller.signal });
-      const data = await responseBody(response);
+      const requestMode = async (mode) => {
+        const retryUntil = Date.now() + (mode.startsWith("gemini") ? 110000 : 30000);
+        while (true) {
+          const form = new FormData();
+          form.append("file", blob, imageSource ? (state.file.name || "imagem.png") : "webcam.jpg");
+          form.append("mode", mode);
+          const response = await fetch("/api/recognize", { method: "POST", body: form, signal: controller.signal });
+          try { return await responseBody(response); }
+          catch (error) {
+            if (error.status !== 429 || !imageSource || Date.now() >= retryUntil) throw error;
+            imageStatus("Aguardando a leitura anterior terminar. Esta imagem será processada automaticamente…");
+            await new Promise((resolve) => setTimeout(resolve, 1000));
+            if (session !== state.session || controller.signal.aborted) return null;
+          }
+        }
+      };
+      let data;
+      try { data = await requestMode(selectedMode); }
+      catch (error) {
+        if (!imageSource || selectedMode !== "yolo_ocr" || ![500, 503].includes(error.status)) throw error;
+        imageStatus("O YOLO não concluiu esta leitura. Tentando com Tesseract…");
+        data = await requestMode("ocr");
+        usedFallback = true;
+      }
+      if (data && imageSource && selectedMode === "yolo_ocr" && !String(data.text || "").trim()) {
+        imageStatus("O YOLO não encontrou palavras. Tentando com Tesseract…");
+        data = await requestMode("ocr");
+        usedFallback = true;
+      }
+      if (!data) return;
       if (session !== state.session) return;
+      showObjectResult(data);
       state.regions = Array.isArray(data.regions) ? data.regions : [];
       state.frameWidth = Number(data.width) || 0;
       state.frameHeight = Number(data.height) || 0;
@@ -293,21 +381,29 @@
         $("region-count").textContent = String(state.regions.length).padStart(2, "0");
       }
       $("frame-info").textContent = `Última leitura · ${new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}`;
-      warning(Array.isArray(data.warnings) ? data.warnings.map((item) => String(item)).join(" ") : "");
+      const warnings = Array.isArray(data.warnings) ? data.warnings.map((item) => String(item)) : [];
+      if (usedFallback) warnings.unshift("Leitura feita com Tesseract após indisponibilidade do YOLO.");
+      warning(warnings.join(" "));
+      if (imageSource) imageStatus(text ? selectedMode.startsWith("gemini") ? "Análise concluída. Veja o resultado ao lado e ouça a descrição." : "Texto encontrado. Veja a transcrição ao lado." : selectedMode.startsWith("gemini") ? "Não encontrei texto nem objeto claro. Tente uma foto mais nítida." : "Não encontrei texto legível. Tente uma imagem mais nítida ou aproxime a frase.", !text);
       if (automatic && reading.missing) {
         if (state.tracker.misses === 1) message("Imagem instável. Mantendo a última frase enquanto você reenquadra.");
       } else if (automatic && reading.waiting) message("Nova frase detectada. Confirmando a leitura…");
-      else if (!text) message("Nenhum texto identificado. Aproxime a câmera, melhore a iluminação e mantenha o texto nítido.");
+      else if (!text) message(selectedMode.startsWith("gemini") ? "Nenhum objeto ou texto identificado. Melhore a iluminação e tente novamente." : "Nenhum texto identificado. Aproxime a câmera, melhore a iluminação e mantenha o texto nítido.");
       else if (reading.committed) message(automatic ? "Texto identificado. Preparando a leitura em voz alta…" : "Texto identificado. Você pode ajustar as palavras ou ouvir novamente.");
       if (text && ui.autoSpeak.checked && (!automatic || !reading.waiting)) {
-        const key = normalize(text);
+        const speechText = typeof data.spoken_text === "string" && data.spoken_text.trim() ? data.spoken_text.trim() : text;
+        const key = normalize(speechText);
         const spoken = [...state.spokenTexts].some((previous) => ReadingStability.similar(key, previous));
-        if (!automatic) queueSpeech(text, true, session);
-        else if (reading.committed && !spoken && document.activeElement !== ui.transcript) queueSpeech(text, false, session);
-        else if (!spoken && !state.speaking && !state.alexaPending && !reading.missing && document.activeElement !== ui.transcript) queueSpeech(text, false, session);
+        if (!automatic) queueSpeech(speechText, true, session);
+        else if (reading.committed && !spoken && document.activeElement !== ui.transcript) queueSpeech(speechText, false, session);
+        else if (!spoken && !state.speaking && !state.alexaPending && !reading.missing && document.activeElement !== ui.transcript) queueSpeech(speechText, false, session);
       }
     } catch (error) {
-      if (error.name !== "AbortError" && session === state.session) message(error instanceof TypeError ? "Não foi possível falar com o servidor. Verifique se o projeto Python continua em execução." : error.message, true);
+      if (error.name !== "AbortError" && session === state.session) {
+        const text = error instanceof TypeError ? "Não foi possível falar com o servidor. Verifique se o projeto Python continua em execução." : error.message;
+        message(text, true);
+        if (imageSource) imageStatus(text, true);
+      }
     } finally {
       clearTimeout(slowTimer);
       clearTimeout(processingTimer);
@@ -543,8 +639,8 @@
 
   async function loadFile(file) {
     if (!file) return;
-    if (file.size > state.maxImageMB * 1024 * 1024) { message(`A imagem excede o limite de ${state.maxImageMB} MB. Envie uma imagem menor.`, true); return; }
-    if (!/^image\/(jpeg|png|webp|bmp|x-ms-bmp)$/i.test(file.type)) { message("Envie uma imagem JPG, PNG, WebP ou BMP.", true); return; }
+    if (file.size > state.maxImageMB * 1024 * 1024) { const text = `A imagem excede o limite de ${state.maxImageMB} MB. Envie uma imagem menor.`; message(text, true); imageStatus(text, true); return; }
+    if (!/^image\/(jpeg|png|webp|bmp|x-ms-bmp)$/i.test(file.type)) { const text = "Envie uma imagem JPG, PNG, WebP ou BMP."; message(text, true); imageStatus(text, true); return; }
     stopCamera(false);
     releaseImage();
     const session = state.session;
@@ -564,7 +660,7 @@
       $("source-info").textContent = `Imagem · ${ui.image.naturalWidth} × ${ui.image.naturalHeight}`;
       $("frame-info").textContent = file.name.length > 35 ? `${file.name.slice(0, 32)}…` : file.name;
       updateControls();
-      message("Imagem carregada. Identificando o texto…");
+      message(ui.mode.value.startsWith("gemini") ? "Imagem carregada. Analisando a foto…" : "Imagem carregada. Identificando o texto…");
       await recognize(false);
     } catch {
       if (session !== state.session) return;
@@ -573,6 +669,7 @@
       ui.placeholder.hidden = false;
       updateControls();
       message("Não foi possível abrir esta imagem. Tente outro arquivo JPG ou PNG.", true);
+      imageStatus("Não foi possível abrir esta imagem. Tente outro arquivo JPG ou PNG.", true);
     }
   }
 
@@ -582,6 +679,7 @@
       const data = await responseBody(response);
       state.maxImageMB = Number(data.limits?.max_image_mb) || 8;
       state.modelExists = Boolean(data.vision?.model_exists);
+      state.geminiConfigured = Boolean(data.gemini?.configured);
       if (!state.modelExists) ui.mode.value = "ocr";
       const ready = data.vision?.ready !== false;
       $("server-dot").classList.toggle("ready", ready);
@@ -614,9 +712,12 @@
   ui.mode.addEventListener("change", () => {
     cancelRecognition();
     clearRegions();
+    clearObjectResult();
+    if (ui.mode.value.startsWith("gemini")) ui.autoRead.checked = false;
     updateControls();
     if (ui.mode.value === "yolo_ocr" && !state.modelExists) warning("Modelo YOLO de texto não encontrado. Configure YOLO_MODEL_PATH no servidor ou selecione Tesseract para continuar.");
-    else { warning(); message(ui.mode.value === "yolo_ocr" ? "YOLO detectará as regiões; Tesseract reconhecerá o texto." : "Tesseract selecionado para reconhecimento de texto."); }
+    else { warning(); message(ui.mode.value === "yolo_ocr" ? "YOLO detectará as regiões; Tesseract reconhecerá o texto." : ui.mode.value === "ocr" ? "Tesseract selecionado para reconhecimento de texto." : ui.mode.value === "gemini_research" ? "Envie uma foto para identificar o objeto e pesquisar informações com fontes." : "Envie uma foto para identificar objetos e ler o texto visível."); }
+    if (ui.mode.value.startsWith("gemini") && !state.geminiConfigured) $("gemini-dialog").showModal();
     if (state.stream && ui.autoRead.checked) scheduleNext(100);
   });
   ui.transcript.addEventListener("input", () => { resetStability(); updateTranscript(); });
@@ -671,6 +772,33 @@
     });
   }
   const voicesDialog = $("voices-dialog");
+  const geminiDialog = $("gemini-dialog");
+  $("open-gemini").addEventListener("click", () => {
+    $("gemini-key-hint").textContent = state.geminiConfigured ? "Chave salva neste computador. Deixe em branco para manter a configuração." : "Salva apenas no .env deste computador; não é exibida de volta.";
+    geminiDialog.showModal();
+  });
+  $("close-gemini").addEventListener("click", () => geminiDialog.close());
+  geminiDialog.addEventListener("close", () => { $("gemini-key").value = ""; });
+  $("gemini-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const key = $("gemini-key").value.trim();
+    $("connect-gemini").disabled = true;
+    $("gemini-config-status").textContent = "Validando a chave Gemini…";
+    $("gemini-config-status").classList.remove("error");
+    try {
+      const data = await responseBody(await fetch("/api/gemini/config", {
+        method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({key}),
+      }));
+      state.geminiConfigured = true;
+      $("gemini-key").value = "";
+      $("gemini-key-hint").textContent = "Chave salva neste computador. Deixe em branco para manter a configuração.";
+      $("gemini-config-status").textContent = data.message;
+      message("Gemini conectado. Envie uma foto ou selecione Identificar texto.");
+    } catch (error) {
+      $("gemini-config-status").textContent = error.message;
+      $("gemini-config-status").classList.add("error");
+    } finally { $("connect-gemini").disabled = false; }
+  });
   async function loadVoiceConfig() {
     try {
       const config = await responseBody(await fetch("/api/voice/config"));
@@ -797,6 +925,7 @@
     ui.transcript.value = "";
     resetStability();
     clearRegions();
+    clearObjectResult();
     ["confidence", "elapsed", "region-count"].forEach((id) => { $(id).textContent = "—"; });
     updateTranscript();
     message(state.stream && ui.autoRead.checked ? "Texto limpo. A leitura contínua permanece ativa." : "Texto limpo. Pronto para uma nova leitura.");

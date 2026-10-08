@@ -19,6 +19,8 @@ class Settings:
     alexa_entity: str = ""
     azure_region: str = ""
     azure_key: str = ""
+    gemini_key: str = ""
+    gemini_model: str = "gemini-3.5-flash-lite"
     max_image_bytes: int = 8 * 1024 * 1024
 
     @classmethod
@@ -40,4 +42,6 @@ class Settings:
             alexa_entity=os.getenv("ALEXA_ENTITY_ID", ""),
             azure_region=os.getenv("AZURE_SPEECH_REGION", ""),
             azure_key=os.getenv("AZURE_SPEECH_KEY", ""),
+            gemini_key=os.getenv("GEMINI_API_KEY", ""),
+            gemini_model=os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite"),
         )

@@ -2,7 +2,7 @@
 
 Projeto Python com interface web em português para ler texto impresso pela webcam, mostrar a transcrição e falar o resultado. Também aceita imagens JPEG, PNG, WebP e BMP.
 
-**YOLO11n localiza regiões de texto; Tesseract reconhece letras, palavras e números em português/inglês.** O detector incluído é especializado em texto. Pesos YOLO genéricos de objetos (COCO) não substituem esse modelo. Há um modo Tesseract para comparar resultados e reduzir o tempo de processamento.
+**YOLO11n localiza regiões de texto; Tesseract reconhece letras, palavras e números em português/inglês.** O detector incluído é especializado em texto. Pesos YOLO genéricos de objetos (COCO) não substituem esse modelo. Há um modo Tesseract para comparar resultados e reduzir o tempo de processamento. Opcionalmente, o Gemini identifica objetos, transcreve uma foto e pesquisa o objeto principal.
 
 ## Executar neste computador
 
@@ -14,7 +14,7 @@ Com as dependências instaladas, dê dois cliques em **`iniciar.cmd`**, mantenha
 
 O código do leitor pode ficar em um repositório GitHub. A apresentação está preparada em `docs/` para publicação em **Settings → Pages → Deploy from a branch → main → /docs**. Ao alterar `app/static/home.html`, `home.css` ou `home.js`, execute `python scripts/build_pages.py` e publique o `docs/` atualizado.
 
-O GitHub Pages hospeda apenas a apresentação estática. A câmera, YOLO, Tesseract e a integração Alexa exigem o servidor Python iniciado em um computador ou hospedagem própria para Python. A página publicada aponta para instruções de download e execução local do leitor. Não publique `.env`, ambientes virtuais nem tokens.
+O GitHub Pages hospeda apenas a apresentação estática. A câmera, YOLO, Tesseract, Gemini e a integração Alexa exigem o servidor Python iniciado em um computador ou hospedagem própria para Python. A página publicada aponta para instruções de download e execução local do leitor. Não publique `.env`, ambientes virtuais nem tokens.
 
 Ou, no PowerShell dentro da pasta do projeto:
 
@@ -27,6 +27,14 @@ Ou, no PowerShell dentro da pasta do projeto:
 3. Leitura contínua e fala automática já começam marcadas. O primeiro texto reconhecido aparece e inicia a fala; perdas breves não apagam a leitura. Uma frase já falada não é repetida durante a sessão. Se o navegador bloquear reprodução, clique uma vez em Ouvir texto para habilitar o áudio.
 4. Use captura manual ou envie `examples/teste-leitura.png` para testar sem câmera.
 5. Você pode corrigir a transcrição e usar o botão de leitura para falar novamente.
+
+### Identificar e pesquisar um objeto em uma foto
+
+1. No leitor, abra **Conectar Gemini** e informe uma chave da API Gemini. A chave é validada e salva apenas no `.env` deste computador.
+2. Em **Motor de leitura**, escolha **Gemini · ler foto e objetos** para identificar objetos e transcrever texto, ou **Gemini · pesquisar objeto** para acrescentar um resumo pesquisado e links das fontes.
+3. Clique em **Carregar imagem** ou capture uma foto da webcam com **Analisar foto**. A análise de imagem carregada começa automaticamente. O objeto principal é marcado na foto quando o Gemini fornece coordenadas, e o texto aparece ao lado. Com **Falar assim que reconhecer** ligado, a descrição é enviada à saída de voz selecionada.
+
+O modo de pesquisa tenta usar a busca do Gemini. Se a cota de busca da chave estiver indisponível, consulta um resumo da Wikipédia em português e mostra o link. Se nenhuma fonte responder, mostra apenas a identificação visual e um aviso. A pesquisa resume as fontes encontradas; confira as informações antes de compartilhar. A foto é enviada ao Google somente nos modos Gemini, e o nome do objeto é consultado na Wikipédia quando ela é usada. Esses modos requerem internet e podem consumir cota da API.
 
 O processamento é contínuo por capturas, não 30 reconhecimentos por segundo. O intervalo é de aproximadamente 1,2 segundo **mais** o tempo da análise. Uma requisição termina antes da próxima. A primeira inicialização do YOLO é mais lenta. Imagens com muitas palavras podem exigir vários segundos. A interface informa o tempo de cada análise.
 
@@ -169,7 +177,7 @@ Os testes automatizados de Alexa usam um servidor simulado e **não enviam falas
 - **Português ausente:** execute `tools/tesseract/tesseract.exe --list-langs`. Instale `por.traineddata` se necessário. A aplicação mostra aviso se usar apenas os idiomas disponíveis.
 - **YOLO ausente/corrompido:** execute novamente `scripts/download_models.py`. O hash do modelo padrão é verificado antes de carregá-lo.
 - **Limites:** arquivos de até 8 MB e 24 megapixels, redimensionados para até 1600 px; até 40 regiões por captura no YOLO e limite de tempo de OCR. Os avisos indicam leituras parciais. Fala da Alexa limitada a 4000 caracteres por envio, sem truncamento silencioso.
-- **Privacidade:** capturas são processadas em memória pelo servidor Python local; não há armazenamento de fotos ou histórico em disco. Imagens não são enviadas a provedores de voz. O texto vai à Microsoft na Voz natural/Azure, ao Google Translate na saída Google, ou ao Home Assistant e integração Amazon na saída Alexa. A voz do sistema pode usar o serviço do provedor conforme a voz escolhida. As fontes visuais são carregadas do Google Fonts, com alternativa local se indisponíveis. O `.env` guarda o token Home Assistant e a chave Azure: mantenha-o privado.
+- **Privacidade:** capturas são processadas em memória pelo servidor Python local; não há armazenamento de fotos ou histórico em disco. Nos modos Gemini, a foto é enviada à API Google Gemini; no modo de pesquisa, o nome do objeto também pode ser consultado na Wikipédia. Imagens não são enviadas a provedores de voz. O texto vai à Microsoft na Voz natural/Azure, ao Google Translate na saída Google, ou ao Home Assistant e integração Amazon na saída Alexa. A voz do sistema pode usar o serviço do provedor conforme a voz escolhida. As fontes visuais são carregadas do Google Fonts, com alternativa local se indisponíveis. O `.env` guarda o token Home Assistant e as chaves Azure/Gemini: mantenha-o privado.
 
 ## Modelos e licenças
 

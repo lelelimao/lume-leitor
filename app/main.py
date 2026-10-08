@@ -16,6 +16,7 @@ from .alexa import AlexaError, AlexaSpeaker
 from .config import ROOT, Settings
 from .alexa_setup import connection_settings, discover, save_settings
 from .google_voice import GoogleVoice
+from .gemini_vision import GeminiError, GeminiVision, gemini_settings, save_gemini
 from .natural_voice import EDGE_VOICES, NaturalVoice, VoiceError, azure_settings, save_azure
 from .vision import EngineUnavailable, RecognitionEngine
 
@@ -55,7 +56,11 @@ class AzureConfigRequest(BaseModel):
     key: str = Field(default="", max_length=4096)
 
 
-def create_app(settings=None, engine=None, speaker=None, env_path=None, google_voice=None, natural_voice=None):
+class GeminiConfigRequest(BaseModel):
+    key: str = Field(default="", max_length=4096)
+
+
+def create_app(settings=None, engine=None, speaker=None, env_path=None, google_voice=None, natural_voice=None, gemini_vision=None):
     settings = settings or Settings.from_env()
     engine = engine or RecognitionEngine(mode=settings.mode, model_path=settings.model_path,
                                         tesseract_cmd=settings.tesseract_cmd,
@@ -64,10 +69,12 @@ def create_app(settings=None, engine=None, speaker=None, env_path=None, google_v
     env_path = env_path or ROOT / ".env"
     google_voice = google_voice or GoogleVoice()
     natural_voice = natural_voice or NaturalVoice()
+    gemini_vision = gemini_vision or GeminiVision()
     config_lock = asyncio.Lock()
     app = FastAPI(title="Lume · Leitor visual", version="2.0.0")
     app.state.engine = engine
     app.state.speaker = speaker
+    app.state.gemini_vision = gemini_vision
     gate = BoundedSemaphore(1)
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=["localhost", "127.0.0.1", "[::1]", "testserver"])
 
@@ -105,10 +112,33 @@ def create_app(settings=None, engine=None, speaker=None, env_path=None, google_v
     async def status():
         vision = await run_in_threadpool(engine.status)
         return {"name": "Lume", "version": "2.0.0", "vision": vision,
-                "alexa": {"configured": speaker.configured}, "limits": {"max_image_mb": 8}}
+                "alexa": {"configured": speaker.configured},
+                "gemini": {"configured": bool(settings.gemini_key), "model": settings.gemini_model},
+                "limits": {"max_image_mb": 8}}
+
+    @app.get("/api/gemini/config")
+    async def gemini_config():
+        return {"configured": bool(settings.gemini_key), "model": settings.gemini_model}
+
+    @app.post("/api/gemini/config")
+    async def save_gemini_config(payload: GeminiConfigRequest):
+        nonlocal settings
+        async with config_lock:
+            try:
+                candidate = gemini_settings(settings, payload.key)
+                await gemini_vision.verify_key(candidate)
+                await run_in_threadpool(save_gemini, env_path, candidate)
+                settings = candidate
+                speaker.settings = candidate
+                return {"configured": True, "model": candidate.gemini_model,
+                        "message": "Gemini conectado. Escolha um modo Gemini e carregue uma foto."}
+            except GeminiError as exc:
+                raise HTTPException(exc.status_code, str(exc)) from exc
+            except OSError as exc:
+                raise HTTPException(500, "Não foi possível salvar a chave no arquivo .env.") from exc
 
     @app.post("/api/recognize")
-    async def recognize(file: UploadFile = File(...), mode: Literal["yolo_ocr", "ocr"] = Form("yolo_ocr")):
+    async def recognize(file: UploadFile = File(...), mode: Literal["yolo_ocr", "ocr", "gemini", "gemini_research"] = Form("yolo_ocr")):
         try:
             contents = await file.read(settings.max_image_bytes + 1)
         finally:
@@ -120,7 +150,14 @@ def create_app(settings=None, engine=None, speaker=None, env_path=None, google_v
         if not gate.acquire(blocking=False):
             raise HTTPException(429, "Uma imagem já está sendo processada. Aguarde um instante.")
         try:
+            if mode.startswith("gemini"):
+                result = await gemini_vision.analyze(contents, settings)
+                if mode == "gemini_research":
+                    result = await gemini_vision.research(result, settings)
+                return result
             return await run_in_threadpool(engine.recognize, contents, mode)
+        except GeminiError as exc:
+            raise HTTPException(exc.status_code, str(exc)) from exc
         except EngineUnavailable as exc:
             raise HTTPException(503, str(exc)) from exc
         except ValueError as exc:
